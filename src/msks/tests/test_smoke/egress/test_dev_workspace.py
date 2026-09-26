@@ -12,7 +12,6 @@ from msks.settings import (
     NetSettings,
     ServerSettings,
     Settings,
-    VmmSettings,
 )
 
 from test_smoke import (
@@ -29,6 +28,7 @@ from test_smoke import (
     needs_egress,
     needs_local,
     run_in_console,
+    smoke_vmm_settings,
 )
 
 
@@ -46,7 +46,7 @@ async def test_local_dev_workspace_bootstrap() -> None:
     ip_tool = os.environ.get("TEST_IP") or shutil.which("ip") or "ip"
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),

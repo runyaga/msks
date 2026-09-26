@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from msks.settings import VmmSettings
 
 VMLINUX = os.environ.get("TEST_VMLINUX")
 INITRD = os.environ.get("TEST_INITRD")
@@ -43,6 +44,18 @@ ROOTFS = os.environ.get("TEST_ROOTFS")
 CMDLINE = os.environ.get("TEST_CMDLINE")
 # The package __init__ sits one level below the old flat module.
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def smoke_vmm_settings(state_dir: Path) -> VmmSettings:
+    """The smoke daemons' VMM settings: a per-test state dir, plus
+    hugepage-backed guest memory when MSKSD_HUGEPAGES=true — the
+    nested-virtualization posture (runyaga#1), where 4 KiB guest
+    pages stretch each boot to minutes. The host reserves the
+    pages."""
+    return VmmSettings(
+        state_dir=state_dir,
+        hugepages=os.environ.get("MSKSD_HUGEPAGES", "").lower() == "true",
+    )
 
 
 def state_dir(env: str, name: str) -> Path:

@@ -21,7 +21,6 @@ from msks.app import build_app
 from msks.microvm import VmSpec
 from msks.settings import (
     Settings,
-    VmmSettings,
 )
 
 from test_smoke import (
@@ -34,13 +33,14 @@ from test_smoke import (
     collect_failure_evidence,
     needs_local,
     run_in_console,
+    smoke_vmm_settings,
 )
 
 
 @needs_local
 async def test_local_workspace_user_sudo() -> None:
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
-    settings = Settings(vmm=VmmSettings(state_dir=state_dir))
+    settings = Settings(vmm=smoke_vmm_settings(state_dir))
     app = build_app(settings)
     microvm = app.state.microvm
     wid = f"smoke-{uuid.uuid4().hex[:8]}"

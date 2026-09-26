@@ -9,7 +9,6 @@ from msks.app import build_app
 from msks.microvm import VmSpec
 from msks.settings import (
     Settings,
-    VmmSettings,
 )
 
 from msks import persist
@@ -23,6 +22,7 @@ from test_smoke import (
     collect_failure_evidence,
     needs_local,
     run_in_console,
+    smoke_vmm_settings,
 )
 
 
@@ -37,7 +37,7 @@ async def test_local_user_data_provisioning() -> None:
     and the seed reaches the guest as a labeled disk.
     """
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
-    settings = Settings(vmm=VmmSettings(state_dir=state_dir))
+    settings = Settings(vmm=smoke_vmm_settings(state_dir))
     app = build_app(settings)
     microvm = app.state.microvm
     wid = f"smoke-{uuid.uuid4().hex[:8]}"
@@ -122,7 +122,7 @@ async def test_local_user_data_cloud_config() -> None:
     cover) lands through cloud-init: write_files puts the file where
     the document says, on the first boot and only there."""
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
-    settings = Settings(vmm=VmmSettings(state_dir=state_dir))
+    settings = Settings(vmm=smoke_vmm_settings(state_dir))
     app = build_app(settings)
     microvm = app.state.microvm
     wid = f"smoke-{uuid.uuid4().hex[:8]}"

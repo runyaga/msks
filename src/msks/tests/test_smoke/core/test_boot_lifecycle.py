@@ -9,7 +9,6 @@ from msks.app import build_app
 from msks.microvm import VmSpec
 from msks.settings import (
     Settings,
-    VmmSettings,
 )
 
 from msks import persist
@@ -23,6 +22,7 @@ from test_smoke import (
     collect_failure_evidence,
     needs_local,
     run_in_console,
+    smoke_vmm_settings,
 )
 
 
@@ -34,7 +34,7 @@ async def test_local_vm_boot_and_shutdown() -> None:
     # poweroff, which matters with persistent disks (#14: a hard stop
     # would drop page-cache writes).
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
-    settings = Settings(vmm=VmmSettings(state_dir=state_dir))
+    settings = Settings(vmm=smoke_vmm_settings(state_dir))
     app = build_app(settings)
     microvm = app.state.microvm
     wid = f"smoke-{uuid.uuid4().hex[:8]}"
@@ -83,7 +83,7 @@ async def test_local_persistence_across_restart_and_reset() -> None:
     - factory reset drops the root write and keeps the /home write.
     """
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
-    settings = Settings(vmm=VmmSettings(state_dir=state_dir))
+    settings = Settings(vmm=smoke_vmm_settings(state_dir))
     app = build_app(settings)
     microvm = app.state.microvm
     wid = f"smoke-{uuid.uuid4().hex[:8]}"
