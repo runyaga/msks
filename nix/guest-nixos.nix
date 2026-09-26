@@ -35,7 +35,8 @@
 # each workspace's own overlay at boot, so the image ships
 # root:root everywhere and carries no setuid bits at all.
 #
-#   $out/vmlinux            - the NixOS kernel (bzImage; named
+#   $out/vmlinux            - the NixOS kernel (bzImage on x86_64,
+#                             Image on aarch64; named
 #                             "vmlinux" to match the
 #                             TEST_VMLINUX contract;
 #                             guest-manifest.json records the
@@ -95,10 +96,19 @@ let
     }
   '';
 
+  # The per-architecture facts (runyaga#1): the build host's system
+  # is the guest's.
+  platform = pkgs.callPackage ./guest-platform.nix { };
+
   nixos =
     (import (pkgs.path + "/nixos") {
-      system = "x86_64-linux";
-      configuration = ./guest-nixos-configuration.nix;
+      inherit (platform) system;
+      configuration = {
+        imports = [ ./guest-nixos-configuration.nix ];
+        # The image build names the guest's platform outright; the
+        # module's own default serves in-guest rebuilds.
+        nixpkgs.hostPlatform = platform.system;
+      };
     }).config;
 
   toplevel = nixos.system.build.toplevel;
@@ -147,7 +157,7 @@ let
   # stop/start. The store path itself resolves INSIDE the guest's
   # rootfs: the archive is self-contained on any host that
   # imports it.
-  kernelCmdline = "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/nix/var/nix/profiles/system/init";
+  kernelCmdline = "console=${platform.serialConsole} root=/dev/vda rootfstype=ext4 rw init=/nix/var/nix/profiles/system/init";
 
   # The system closure plus the channel source, resolved by nix:
   # store-paths lists every path stage-2 activation, the units,
@@ -177,6 +187,7 @@ let
         guestConfiguration = ./guest-nixos-configuration.nix;
         consoleHelperPkgFile = ./console-helper-pkg.nix;
         agentToolchainFile = ./agent-toolchain.nix;
+        guestPlatformFile = ./guest-platform.nix;
         piExtensionFile = ./guest-pi-extension.ts;
         shrinkwrapPatchFile = ./pi-shrinkwrap-patch.py;
         shrinkwrapTableFile = ./pi-shrinkwrap-integrity.json;
@@ -262,6 +273,8 @@ let
           "$root"/etc/nixos/nix/console-helper-pkg.nix
         cp "$agentToolchainFile" \
           "$root"/etc/nixos/nix/agent-toolchain.nix
+        cp "$guestPlatformFile" \
+          "$root"/etc/nixos/nix/guest-platform.nix
         cp "$piExtensionFile" \
           "$root"/etc/nixos/nix/guest-pi-extension.ts
         cp "$shrinkwrapPatchFile" \
@@ -483,7 +496,7 @@ let
         # spec. The capabilities carry the whole NixOS-vs-Debian
         # difference the daemon acts on — the same declared
         # cloud-init provisioner, the same prelude-v1 console, the
-        # same bzImage direct boot.
+        # same direct kernel boot.
         cat > "$out"/disk/image.json <<EOF
         {
           "schema": 2,
@@ -494,7 +507,7 @@ let
           "console_protocol": "prelude-v1",
           "console_users": ["root", "msks"],
           "kernel_version": "${kernelVersion}",
-          "kernel_format": "bzImage",
+          "kernel_format": "${platform.kernelFormat}",
           "capabilities": {"provisioner": "${imageProvisioner}"}
         }
         EOF
@@ -546,7 +559,7 @@ pkgs.runCommand "msks-guest-nixos"
     {
       "schema": 1,
       "kernel_version": "${kernelVersion}",
-      "kernel_format": "bzImage",
+      "kernel_format": "${platform.kernelFormat}",
       "cmdline": "${kernelCmdline}",
       "vmlinux": "vmlinux",
       "initrd": "initrd",

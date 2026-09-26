@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -260,21 +261,27 @@ def test_the_image_bakes_the_agent_toolchain() -> None:
     and in the skeleton every seed-provisioned account copies."""
     build = (REPO_ROOT / "nix" / "guest-debian.nix").read_text()
     pins = (REPO_ROOT / "nix" / "agent-toolchain.nix").read_text()
+    platform = (REPO_ROOT / "nix" / "guest-platform.nix").read_text()
     # String fragments, not joined URLs: nixfmt reflows the
     # concatenation layout, and the fragments are the stable atoms.
+    # The per-architecture artifacts live in the platform table
+    # (runyaga#1); each build takes its host's row.
     assert '"https://nodejs.org/dist/v22.23.3/"' in build
-    assert '"node-v22.23.3-linux-x64.tar.gz"' in build
+    assert "platform.nodeTarball.name" in build
+    assert '"node-v22.23.3-linux-x64.tar.gz"' in platform
     assert "pi-coding-agent-0.87.1.tgz" in pins
     # A real npmDepsHash, not the placeholder the two-step prefetch
     # starts from.
     assert "AAAAAAAAAAAAAAAAAAAAAAAA" not in pins
-    assert '"v0.9.1/herdr-linux-x86_64"' in pins
+    assert "platform.herdrBinary.name" in pins
+    assert '"v0.9.1/herdr-linux-x86_64"' in platform
     # herdr's Apache-2.0 notice travels with the binary, pinned to
     # the same tag.
     assert '"v0.9.1/LICENSE"' in pins
     assert "$out/usr/local/share/doc/herdr/LICENSE" in build
     assert '"claude-code-2.1.281.tgz"' in pins
-    assert '"claude-code-linux-x64-2.1.281.tgz"' in pins
+    assert "platform.claudeBinary.name" in pins
+    assert '"claude-code-linux-x64-2.1.281.tgz"' in platform
     assert "$out/usr/local/bin/claude" in build
     assert "$out/etc/skel/.pi/agent/extensions/llm-models.ts" in build
     assert "$out/root/.pi/agent/extensions/llm-models.ts" in build
@@ -293,8 +300,8 @@ def test_the_image_bakes_the_agent_toolchain() -> None:
     # pool URL and checksum like the kernel and rsync debs, staged
     # with the same linkage guard, in the layout apt leaves (fd's
     # real ELF under usr/lib/cargo/bin, fdfind a symlink).
-    assert "fd-find_10.2.0-1+b5_amd64.deb" in build
-    assert "ripgrep_14.1.1-1+b4_amd64.deb" in build
+    assert "fd-find_10.2.0-1+b5_amd64.deb" in platform
+    assert "ripgrep_14.1.1-1+b4_amd64.deb" in platform
     assert '"$root"/usr/lib/cargo/bin/fd' in build
     assert 'ln -s ../lib/cargo/bin/fd "$root"/usr/bin/fdfind' in build
     assert "install -D -m 0755 rg-deb/usr/bin/rg" in build
@@ -311,6 +318,59 @@ def test_the_image_bakes_the_agent_toolchain() -> None:
     # silently checks nothing.
     assert "gsub(/\\[\\]/" not in build
     assert "gsub(/[\\[\\]]/" in build
+
+
+def platform_rows() -> dict[str, dict[str, str]]:
+    """The guest platform table's rows: each system's pinned
+    artifact names and its scalar facts, read from the Nix source
+    (fragments, as the other pin tests read them)."""
+    text = (REPO_ROOT / "nix" / "guest-platform.nix").read_text()
+    rows: dict[str, dict[str, str]] = {}
+    for system in ("x86_64-linux", "aarch64-linux"):
+        start = text.index(f"    {system} = {{")
+        end = text.index("\n    };\n", start)
+        body = text[start:end]
+        facts = dict(re.findall(r'^      (\w+) = "([^"]*)";$', body, re.M))
+        names = re.findall(
+            r'^      (\w+) = \{\n        name = "([^"]*)";', body, re.M
+        )
+        rows[system] = facts | {key: name for key, name in names}
+    return rows
+
+
+def test_the_platform_table_pins_both_architectures_alike() -> None:
+    """The guest platform table (runyaga#1): an x86_64 and an
+    aarch64 row carrying the same facts, each artifact at the same
+    upstream version — a pin bump that moves one architecture and
+    forgets the other fails here."""
+    rows = platform_rows()
+    x86, arm = rows["x86_64-linux"], rows["aarch64-linux"]
+    assert x86.keys() == arm.keys()
+    assert (x86["debianArch"], arm["debianArch"]) == ("amd64", "arm64")
+    assert (x86["serialConsole"], arm["serialConsole"]) == ("ttyS0", "ttyAMA0")
+    assert (x86["kernelFormat"], arm["kernelFormat"]) == ("bzImage", "Image")
+    # Same version on both rows: normalizing each architecture's
+    # spellings to a placeholder must give identical names.
+    spellings = {
+        "x86_64-linux": ("amd64", "x86_64", "x64"),
+        "aarch64-linux": ("arm64", "aarch64"),
+    }
+
+    def normalized(system: str, name: str) -> str:
+        for word in spellings[system]:
+            name = name.replace(word, "ARCH")
+        return name
+
+    artifacts = [
+        key
+        for key in x86
+        if key.endswith(("Deb", "Image", "Tarball", "Binary"))
+    ]
+    assert len(artifacts) == 8
+    for key in artifacts:
+        assert normalized("x86_64-linux", x86[key]) == normalized(
+            "aarch64-linux", arm[key]
+        ), key
 
 
 def test_the_nixos_image_ships_the_agent_toolchain() -> None:
@@ -462,8 +522,13 @@ def test_the_nixos_image_is_rebuild_ready() -> None:
         "/nixos/default.nix" in build
     )
     # One source of truth: the image build evaluates the same file
-    # the guest rebuild imports.
-    assert "configuration = ./guest-nixos-configuration.nix;" in build
+    # the guest rebuild imports, and the platform table the module
+    # chain imports (runyaga#1) ships beside it.
+    assert "imports = [ ./guest-nixos-configuration.nix ];" in build
+    assert (
+        'cp "$guestPlatformFile" \\\n'
+        '          "$root"/etc/nixos/nix/guest-platform.nix' in build
+    )
     # The vsock port guard (#274 review): the extraction duplicated
     # vsockShellPort across two files — the build asserts the
     # module's service unit carries the same port the manifest

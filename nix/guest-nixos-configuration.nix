@@ -45,12 +45,20 @@ let
   # because Debian's own Node is older than pi's engines floor).
   toolchain = pkgs.callPackage ./agent-toolchain.nix { };
 
+  # The per-architecture facts (runyaga#1): the serial console
+  # device below.
+  platform = pkgs.callPackage ./guest-platform.nix { };
+
   # The model-discovery extension (#266, #268): the shared source
   # file the tmpfiles rules below plant inside the guest.
   piExtension = ./guest-pi-extension.ts;
 in
 {
-  nixpkgs.hostPlatform = "x86_64-linux";
+  # The guest's own architecture (runyaga#1). The image build sets
+  # the platform outright (nix/guest-nixos.nix); an in-guest
+  # `nixos-rebuild` evaluates impurely, so the running system's
+  # architecture is the default.
+  nixpkgs.hostPlatform = lib.mkDefault builtins.currentSystem;
 
   # Runtime accounts stay first-class: the identity seed (#248)
   # creates the workspace's login user with shadow's useradd at
@@ -129,7 +137,7 @@ in
     ];
   };
 
-  boot.kernelParams = [ "console=ttyS0" ];
+  boot.kernelParams = [ "console=${platform.serialConsole}" ];
 
   # Stage-1 holds the discipline the Debian build's six-module
   # initramfs established (#37, docs/boot-speed.md): the initrd
@@ -251,11 +259,12 @@ in
   };
 
   # The serial console is the guest's debug channel: autologin
-  # root on ttyS0 (the vsock console is the supported interactive
+  # root on the serial console — ttyS0 on x86_64, ttyAMA0 on
+  # aarch64 (the vsock console is the supported interactive
   # path), the same parity the Debian image ships. NixOS's getty
   # module bakes --autologin into the getty/serial-getty/console-
   # getty templates; systemd's getty-generator instantiates
-  # serial-getty@ttyS0 from console=ttyS0.
+  # the matching serial-getty@ instance from the console= argument.
   services.getty.autologinUser = "root";
 
   # One console look across images: the Debian guest's plain

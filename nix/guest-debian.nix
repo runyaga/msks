@@ -21,8 +21,10 @@
 # sha256 ("latest" is a moving pointer; dated builds stay
 # published).
 #
-#   $out/vmlinux            - Debian's generic kernel (bzImage, PVH
-#                             entry point; CONFIG_PVH=y). Named
+#   $out/vmlinux            - Debian's generic kernel (bzImage with
+#                             the PVH entry point on x86_64, the
+#                             arm64 boot Image on aarch64 — see
+#                             nix/guest-platform.nix). Named
 #                             "vmlinux" to match the
 #                             TEST_VMLINUX contract;
 #                             guest-manifest.json records the actual
@@ -58,6 +60,10 @@
 }:
 
 let
+  # The per-architecture facts and pins (runyaga#1): the build host's
+  # system selects the guest's architecture.
+  platform = pkgs.callPackage ./guest-platform.nix { };
+
   # The official Debian 13 genericcloud image (#41): systemd plus
   # cloud-init and its python3 runtime — the workspace's cidata seed
   # is NoCloud's own format, so first-boot provisioning needs no
@@ -65,9 +71,9 @@ let
   # the build used before; the boot diet below keeps the console fast.
   debianImage = pkgs.fetchurl {
     urls = [
-      "https://cloud.debian.org/images/cloud/trixie/20260831-2587/debian-13-genericcloud-amd64-20260831-2587.qcow2"
+      "https://cloud.debian.org/images/cloud/trixie/20260831-2587/${platform.debianImage.name}"
     ];
-    hash = "sha512:8ea9faae810043a0b35b0149f05014f26705c2339ffb11ead308f33e844a87cc3ef46ec81d5262b38817b6a88af404874d48a5857ebe072ef6a31dfb6e371f50";
+    inherit (platform.debianImage) hash;
   };
 
   # The port the guest's vsock console listens on; the daemon dials
@@ -88,7 +94,7 @@ let
   # Root boots read-write (#14): the per-workspace qcow2 overlay
   # absorbs writes over this pristine base — copy-on-write protects
   # it, an ro mount would block apt and provisioning state.
-  kernelCmdline = "console=ttyS0 root=/dev/vda rootfstype=ext4 rw";
+  kernelCmdline = "console=${platform.serialConsole} root=/dev/vda rootfstype=ext4 rw";
 
   # Debian's GENERIC kernel flavor (#96) — one deb fetch and one
   # version pin serve the workspace guest and its nested-KVM
@@ -102,9 +108,8 @@ let
   # matching /usr/lib/modules tree.
   genericKernelDeb = pkgs.fetchurl {
     url =
-      "https://deb.debian.org/debian/pool/main/l/linux/"
-      + "linux-image-6.12.107+deb13-amd64-unsigned_6.12.107-1_amd64.deb";
-    hash = "sha256-fRPNgqHTd+QIJsMT9du9su3xtIxxOjdeTP5eIHdJy04=";
+      "https://deb.debian.org/debian/pool/main/l/linux/" + platform.kernelDeb.name;
+    inherit (platform.kernelDeb) hash;
   };
 
   genericKernel =
@@ -126,9 +131,8 @@ let
   # every NEEDED soname resolves inside the tree (the #36 bug class).
   rsyncDeb = pkgs.fetchurl {
     url =
-      "https://deb.debian.org/debian/pool/main/r/rsync/"
-      + "rsync_3.4.1+ds1-5+deb13u4_amd64.deb";
-    hash = "sha256-iqEi9rqNL/ESxyu5gU7glu5RbwITs2uYu+ecg8kvsiY=";
+      "https://deb.debian.org/debian/pool/main/r/rsync/" + platform.rsyncDeb.name;
+    inherit (platform.rsyncDeb) hash;
   };
 
   # Debian's own fd-find and ripgrep (#272): pi resolves its fd
@@ -145,15 +149,15 @@ let
   fdFindDeb = pkgs.fetchurl {
     url =
       "https://deb.debian.org/debian/pool/main/r/rust-fd-find/"
-      + "fd-find_10.2.0-1+b5_amd64.deb";
-    hash = "sha256-FVTGiS23vhDUxr2/GfetQXKCahttAeXMU3uB1rAttNE=";
+      + platform.fdFindDeb.name;
+    inherit (platform.fdFindDeb) hash;
   };
 
   ripgrepDeb = pkgs.fetchurl {
     url =
       "https://deb.debian.org/debian/pool/main/r/rust-ripgrep/"
-      + "ripgrep_14.1.1-1+b4_amd64.deb";
-    hash = "sha256-fgwyUQwmTDEzX+O5rjerdtzSL30WJ6CghRilvyixesI=";
+      + platform.ripgrepDeb.name;
+    inherit (platform.ripgrepDeb) hash;
   };
 
   # The minimal initramfs (#37's shape, #96's module set): busybox,
@@ -238,8 +242,8 @@ let
   # the rule, and here it does not. (The NixOS image's Node comes
   # from nixpkgs — there the platform's packaging exists.)
   agentNodeTarball = pkgs.fetchurl {
-    url = "https://nodejs.org/dist/v22.23.3/" + "node-v22.23.3-linux-x64.tar.gz";
-    hash = "sha256-EISqNhlrukw6Xmmh7jiKbk/3KdrQlEX7zUNLKP48JK8=";
+    url = "https://nodejs.org/dist/v22.23.3/" + platform.nodeTarball.name;
+    inherit (platform.nodeTarball) hash;
   };
 
   # The rest of the agent toolchain (#266, #268): the shared pins
@@ -273,7 +277,7 @@ let
           $out/etc/cloud/cloud.cfg.d \
           $out/etc/sudoers.d \
           $out/etc/ssh/sshd_config.d \
-          $out/etc/systemd/system/serial-getty@ttyS0.service.d \
+          $out/etc/systemd/system/serial-getty@${platform.serialConsole}.service.d \
           $out/etc/systemd/system/ssh.service.d \
           $out/etc/systemd/system/multi-user.target.wants \
           $out/etc/systemd/system/sockets.target.wants \
@@ -522,7 +526,7 @@ let
           ''' \
           '[Service]' \
           'Type=oneshot' \
-          'ExecStart=/bin/sh -c "modprobe kvm-intel || modprobe kvm-amd || true"' \
+          'ExecStart=/bin/sh -c "${platform.kvmModprobe}"' \
           'RemainAfterExit=yes' \
           ''' \
           '[Install]' \
@@ -628,12 +632,12 @@ let
         ln -s /dev/null $out/etc/systemd/system/apparmor.service
 
         # The serial console is the guest's debug channel: autologin root
-        # on ttyS0 (the vsock console is the supported interactive path).
+        # on the platform's serial console (the vsock console is the supported interactive path).
         printf '%s\n' \
           '[Service]' \
           'ExecStart=' \
           'ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM' \
-          > $out/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+          > $out/etc/systemd/system/serial-getty@${platform.serialConsole}.service.d/autologin.conf
 
       '';
 
@@ -1035,7 +1039,8 @@ let
         # ACPI power-button pair (button + evdev: logind answers the
         # host-side graceful shutdown with a clean poweroff, #25),
         # isofs (the #41 NoCloud seed disk is iso9660),
-        # crc32c-intel (the hardware crc32c ext4's metadata_csum
+        # the platform's CPU modules (nix/guest-platform.nix; on
+        # x86_64: crc32c-intel, the hardware crc32c ext4's metadata_csum
         # asks the crypto API for; udev autoloads it via its
         # x86cpu modalias), and the L3 recursion set (#82): the
         # nested-KVM trio (kvm-intel/kvm-amd; a workspace running
@@ -1068,9 +1073,7 @@ let
           button
           evdev
           isofs
-          crc32c-intel
-          kvm-intel
-          kvm-amd
+          ${lib.concatStringsSep "\n  " platform.cpuModules}
           tun
           nf_tables
           nft_chain_nat
@@ -1192,7 +1195,7 @@ let
           name=$(basename "$bin")
           for so in $(readelf -d "$bin" \
             | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); print $NF}'); do
-            test -e "$root"/usr/lib/x86_64-linux-gnu/"$so" \
+            test -e "$root"/usr/lib/${platform.multiarch}/"$so" \
               || { echo "$name needs $so, absent from the tree" >&2; \
                    exit 1; }
           done
@@ -1214,7 +1217,7 @@ let
                 need && /  Name: /{print f, $3}')
           while read -r so ver; do
             [ -n "$so" ] || continue
-            lib="$root"/usr/lib/x86_64-linux-gnu/"$so"
+            lib="$root"/usr/lib/${platform.multiarch}/"$so"
             readelf --version-info "$lib" | grep -q "Name: $ver" \
               || { echo "$name needs $ver from $so; the tree's " \
                    "copy is older" >&2; exit 1; }
@@ -1267,7 +1270,7 @@ let
         test -x "$root"/usr/local/bin/pi
         test -x "$root"/usr/local/bin/herdr
         test -x "$root"/usr/local/bin/claude
-        test -x "$root"/usr/local/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64/claude
+        test -x "$root"/usr/local/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-${platform.claudePlatform}/claude
         test -f \
           "$root"/etc/skel/.pi/agent/extensions/llm-models.ts
         test -f "$root"/root/.pi/agent/extensions/llm-models.ts
@@ -1280,11 +1283,11 @@ let
         # here, not at the workspace's first launch. herdr is
         # asserted static: it needs nothing from the tree.
         for bin in "$root"/usr/local/bin/node \
-          "$root"/usr/local/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64/claude; do
+          "$root"/usr/local/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-${platform.claudePlatform}/claude; do
           for so in $(readelf -d "$bin" \
             | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); print $NF}'); do
-            test -e "$root"/usr/lib/x86_64-linux-gnu/"$so" \
-              || test -e "$root"/lib/x86_64-linux-gnu/"$so" \
+            test -e "$root"/usr/lib/${platform.multiarch}/"$so" \
+              || test -e "$root"/lib/${platform.multiarch}/"$so" \
               || { echo "$bin needs $so, absent from the tree" >&2; \
                    exit 1; }
           done
@@ -1303,8 +1306,8 @@ let
                 need && /  Name: /{print f, $3}')
           while read -r so ver; do
             [ -n "$so" ] || continue
-            lib="$root"/usr/lib/x86_64-linux-gnu/"$so"
-            [ -e "$lib" ] || lib="$root"/lib/x86_64-linux-gnu/"$so"
+            lib="$root"/usr/lib/${platform.multiarch}/"$so"
+            [ -e "$lib" ] || lib="$root"/lib/${platform.multiarch}/"$so"
             readelf --version-info "$lib" | grep -q "Name: $ver" \
               || { echo "$bin needs $ver from $so; the tree's copy is older" \
                    >&2; exit 1; }
@@ -1337,8 +1340,8 @@ let
         npmcli="$root"/usr/local/lib/node_modules/npm/bin/npm-cli.js
         [ "$(head -n 1 "$npmcli")" = '#!/usr/bin/env node' ] \
           || { echo "npm-cli.js lost its env-node shebang" >&2; exit 1; }
-        ldso="$root"/lib64/ld-linux-x86-64.so.2
-        libpath="$root"/usr/lib/x86_64-linux-gnu
+        ldso="$root"${platform.loader}
+        libpath="$root"/usr/lib/${platform.multiarch}
         run_tool() { "$ldso" --library-path "$libpath" "$@"; }
         run_tool "$root"/usr/local/bin/node --version \
           | grep -q '^v[0-9][0-9.]*$'
@@ -1510,7 +1513,7 @@ let
           "console_protocol": "prelude-v1",
           "console_users": ["root", "msks"],
           "kernel_version": "$kernel_version",
-          "kernel_format": "bzImage",
+          "kernel_format": "${platform.kernelFormat}",
           "capabilities": {"provisioner": "${imageProvisioner}"}
         }
         EOF
@@ -1571,7 +1574,7 @@ pkgs.runCommand "msks-guest"
     {
       "schema": 1,
       "kernel_version": "$version",
-      "kernel_format": "bzImage",
+      "kernel_format": "${platform.kernelFormat}",
       "cmdline": "${kernelCmdline}",
       "vmlinux": "vmlinux",
       "initrd": "initrd",
