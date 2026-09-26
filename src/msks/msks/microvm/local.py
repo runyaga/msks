@@ -240,6 +240,7 @@ def vm_config(
     serial_log: Path,
     vsock_socket: Path | None = None,
     net: dict | None = None,
+    hugepages: bool = False,
 ) -> dict:
     """The ``PUT /api/v1/vm.create`` body for one spec (v52 schema).
 
@@ -259,7 +260,15 @@ def vm_config(
     plain dict ``{"tap": ..., "mac": ...}`` from the net manager's
     attachment; v52 takes a one-element sequence), and ``mac`` pins
     the workspace's deterministic MAC.
+
+    ``hugepages`` backs the guest's memory with the host's reserved
+    hugepages (``MSKSD_HUGEPAGES``) — the nested-virtualization
+    posture, where 4 KiB guest pages make every first touch a costly
+    nested fault.
     """
+    memory: dict = {"size": spec.mem_mib * 1024 * 1024}
+    if hugepages:
+        memory["hugepages"] = True
     payload: dict = {
         "kernel": str(spec.kernel),
         "cmdline": spec.cmdline,
@@ -268,7 +277,7 @@ def vm_config(
         payload["initramfs"] = str(spec.initrd)
     vm: dict = {
         "cpus": {"boot_vcpus": spec.cpus, "max_vcpus": spec.cpus},
-        "memory": {"size": spec.mem_mib * 1024 * 1024},
+        "memory": memory,
         "payload": payload,
         "disks": disks,
         "serial": {"mode": "File", "file": str(serial_log)},
@@ -600,7 +609,14 @@ class LocalCloudHypervisor(MicrovmDriver):
         api = CloudHypervisorApi(socket_path, timeout_s)
         try:
             await api.create(
-                vm_config(spec, disks, serial_log, vsock_socket, net)
+                vm_config(
+                    spec,
+                    disks,
+                    serial_log,
+                    vsock_socket,
+                    net,
+                    self._settings().vmm.hugepages,
+                )
             )
             await api.boot()
         finally:

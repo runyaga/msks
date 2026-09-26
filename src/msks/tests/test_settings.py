@@ -25,6 +25,15 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.vmm.console_stall_timeout_s == 0
 
 
+def test_hugepages_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MSKSD_HUGEPAGES (runyaga#1): off by default, `true` turns it
+    on."""
+    monkeypatch.delenv("MSKSD_HUGEPAGES", raising=False)
+    assert Settings.from_env().vmm.hugepages is False
+    monkeypatch.setenv("MSKSD_HUGEPAGES", "true")
+    assert Settings.from_env().vmm.hugepages is True
+
+
 def test_negative_forward_wait_timeout_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

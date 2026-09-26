@@ -443,6 +443,7 @@ def test_layered_env_iterates_and_measures(
 KEY_CASES = [
     ("vmm_driver", "local", "vmm.driver", "local"),
     ("cloud_hypervisor", "/ch", "vmm.cloud_hypervisor", "/ch"),
+    ("hugepages", True, "vmm.hugepages", True),
     ("state_dir", "/st", "vmm.state_dir", "/st"),
     ("socket_wait_timeout_s", 11.0, "vmm.socket_wait_timeout_s", 11.0),
     ("request_timeout_s", 6.0, "vmm.request_timeout_s", 6.0),

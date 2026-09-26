@@ -92,6 +92,14 @@ class VmmSettings:
 
     driver: str = "local"
     cloud_hypervisor: str = "cloud-hypervisor"
+    # Hugepage-backed guest memory (runyaga#1): cloud-hypervisor maps
+    # each workspace's RAM from the host's reserved 2 MiB hugepages.
+    # A daemon running inside a VM with nested virtualization wants
+    # it — every guest page's first touch is a nested stage-2 fault,
+    # and 4 KiB pages turn an 8 GiB guest's boot into minutes where
+    # hugepages keep it to seconds. The host reserves the pages
+    # (vm.nr_hugepages) to cover every running workspace's memory.
+    hugepages: bool = False
     state_dir: Path = field(
         default_factory=lambda: Path("~/.local/state/msksd").expanduser()
     )
@@ -407,6 +415,7 @@ def vmm_settings_from_env(
         cloud_hypervisor=_env(
             env, "MSKSD_CLOUD_HYPERVISOR", cls.cloud_hypervisor
         ),
+        hugepages=flag_env(env, "MSKSD_HUGEPAGES", cls.hugepages),
         state_dir=Path(
             _env(env, "MSKSD_STATE_DIR", str(cls().state_dir))
         ).expanduser(),

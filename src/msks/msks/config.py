@@ -67,6 +67,7 @@ SETTING_ENV_VARS: tuple[str, ...] = (
     # VmmSettings — the local cloud-hypervisor driver.
     "MSKSD_VMM_DRIVER",
     "MSKSD_CLOUD_HYPERVISOR",
+    "MSKSD_HUGEPAGES",
     "MSKSD_STATE_DIR",
     "MSKSD_SOCKET_WAIT_TIMEOUT_S",
     "MSKSD_REQUEST_TIMEOUT_S",
@@ -526,6 +527,9 @@ def render_template() -> str:
 #                           # per-workspace artifacts
 # cloud_hypervisor: cloud-hypervisor  # the VMM binary the local
 #                           # driver execs
+# hugepages: false          # back guest memory with the host's
+#                           # reserved hugepages (a daemon inside a
+#                           # nested-virtualization VM wants this)
 # vsock_shell_port: 1023    # the vsock port the guest console
 #                           # listens on
 # vsock_wait_timeout_s: 15.0    # seconds to wait for the console at
