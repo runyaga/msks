@@ -178,8 +178,6 @@ in
       e2fsprogs # resize2fs/e2fsck: grow and check workspace volumes
       cdrtools # genisoimage: the #41 cidata seed disks (iso9660)
       jscpd # token-clone scanner (#71), pinned rust binary (see above)
-      openssh # host-side ssh client: the forward-path smoke (#110) and
-      # the documented ssh workflow (#112) run over `msks forward`
       qemu # qemu-img for rootfs conversion during guest-image experiments
       rsync # host-side rsync over the forward (#110's sync path)
       secretspec # the #198 secret store's CLI (pinned release binary)
@@ -197,6 +195,12 @@ in
       (python314Packages.radon) # complexity introspection (radon cc)
     ]
     ++ lib.optionals stdenv.isLinux [
+      # host-side ssh client: the forward-path smoke (#110) and the
+      # documented ssh workflow (#112) run over `msks forward`. A
+      # macOS shell uses the system ssh, which reads the options
+      # Apple's build adds (UseKeychain) that a user's ~/.ssh/config
+      # may carry and nixpkgs' openssh rejects.
+      openssh
       cloud-hypervisor # VMM driven by the local backend (#1); ships ch-remote
       iproute2 # taps and addresses for the dev daemon's workspaces
       iptables # diagnose foreign FORWARD drops (docker's policy on CI runners)
