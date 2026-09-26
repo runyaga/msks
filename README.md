@@ -218,9 +218,9 @@ VM's state directory (`limactl start` prints the same lines when it
 finishes):
 
 ```bash
-state=/home/$USER.guest/msks/.devenv/state/msksd
-export MSKSC_URL=https://127.0.0.1:$(limactl shell msks -- cat $state/port)
-export MSKSC_TOKEN=$(limactl shell msks -- cat $state/bootstrap-token)
+state=msks/.devenv/state/msksd   # below the VM user's home
+export MSKSC_URL=https://127.0.0.1:$(limactl shell msks -- bash -c "cat ~/$state/port")
+export MSKSC_TOKEN=$(limactl shell msks -- bash -c "cat ~/$state/bootstrap-token")
 mkdir -p ~/.config/msks
 limactl copy msks:$state/msks-ca.pem ~/.config/msks/lima-ca.pem
 export MSKSC_CAFILE=~/.config/msks/lima-ca.pem

@@ -139,9 +139,9 @@ probes:
 message: |
   msks is running in the {{.Name}} VM. Point the Mac-side client at it:
 
-    state={{.Home}}/msks/.devenv/state/msksd
-    export MSKSC_URL=https://127.0.0.1:$(limactl shell {{.Name}} -- cat $state/port)
-    export MSKSC_TOKEN=$(limactl shell {{.Name}} -- cat $state/bootstrap-token)
+    state=msks/.devenv/state/msksd   # below the VM user's home
+    export MSKSC_URL=https://127.0.0.1:$(limactl shell {{.Name}} -- bash -c "cat ~/$state/port")
+    export MSKSC_TOKEN=$(limactl shell {{.Name}} -- bash -c "cat ~/$state/bootstrap-token")
     mkdir -p ~/.config/msks
     limactl copy {{.Name}}:$state/msks-ca.pem ~/.config/msks/lima-ca.pem
     export MSKSC_CAFILE=~/.config/msks/lima-ca.pem
