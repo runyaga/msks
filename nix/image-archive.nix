@@ -17,6 +17,11 @@
   pkgs,
 }:
 
+let
+  # The OCI config's architecture names the guest's (runyaga#1):
+  # Debian's arch names (amd64, arm64) are the OCI ones too.
+  platform = pkgs.callPackage ./guest-platform.nix { };
+in
 {
   # bootTree: a directory holding boot/{vmlinuz,initrd.img} and
   # disk/{rootfs.ext4,image.json}. imageName/imageVersion: the
@@ -55,7 +60,7 @@
         # diff_ids (the uncompressed layer's digest).
         layer_digest=$(sha256sum "work/$imageId/layer.tar" | cut -d' ' -f1)
         printf '%s' \
-          '{"architecture":"amd64","os":"linux","config":{},' \
+          '{"architecture":"${platform.debianArch}","os":"linux","config":{},' \
           '"rootfs":{"type":"layers","diff_ids":["sha256:'"$layer_digest"'"]}}' \
           > "work/$imageId/json"
         # Unquoted heredocs: the env-provided name/version/imageId

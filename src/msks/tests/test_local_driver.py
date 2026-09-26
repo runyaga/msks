@@ -167,6 +167,26 @@ def test_vm_config_matches_v52_schema(tmp_path: Path) -> None:
     assert "initramfs" not in config["payload"]
 
 
+def test_vm_config_backs_memory_with_hugepages(tmp_path: Path) -> None:
+    """MSKSD_HUGEPAGES (runyaga#1): the memory section asks
+    cloud-hypervisor for hugepage-backed guest RAM, same size."""
+    config = vm_config(
+        VmSpec(
+            workspace_id=WID,
+            kernel=tmp_path / "k",
+            rootfs=tmp_path / "r",
+            mem_mib=2048,
+        ),
+        disk_entries(tmp_path, WID),
+        tmp_path / "serial.log",
+        hugepages=True,
+    )
+    assert config["memory"] == {
+        "size": 2048 * 1024 * 1024,
+        "hugepages": True,
+    }
+
+
 def test_disk_entries_carry_overlay_and_home(tmp_path: Path) -> None:
     """The VM's disks (#14): writable overlay over the base first,
     home volume second — position makes the root device."""
@@ -220,6 +240,19 @@ async def test_launch_puts_create_then_boot(env, fake, tmp_path: Path) -> None:
     assert body["memory"]["size"] == 8192 * 1024 * 1024
     # The VM boots its persistent artifacts (#14), never the base.
     assert body["disks"] == disk_entries(state_dir, WID)
+    await app.state.microvm.kill(WID)  # reap the stub VMM
+
+
+async def test_launch_carries_the_hugepages_setting(
+    env, fake, tmp_path: Path
+) -> None:
+    """The daemon's MSKSD_HUGEPAGES reaches the create body
+    (runyaga#1)."""
+    app, _, _ = env
+    app.state.settings.vmm.hugepages = True
+    await app.state.microvm.launch(spec(tmp_path))
+    body = dict(fake.requests[0][2])
+    assert body["memory"]["hugepages"] is True
     await app.state.microvm.kill(WID)  # reap the stub VMM
 
 

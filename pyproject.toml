@@ -34,13 +34,14 @@ dependencies = [
   # it only alongside a re-review of CHAT_FIELDS.
   "litellm>=1.86,<2",
   # Egress consent's NFQUEUE binding (#69): consent is the normal
-  # posture for workspaces, so the binding ships with every
-  # install. It links libnetfilter_queue — devenv carries the
-  # library for dev/CI shells, and nix/msks-pkg.nix ships the
-  # binding in the msksd package; the import stays guarded so
-  # an exotic install without the library fails closed at attach
-  # with a named refusal, never silently.
-  "netfilterqueue>=0.9",
+  # posture for workspaces, so the binding ships with every Linux
+  # install. It links libnetfilter_queue, a Linux-only library —
+  # devenv carries it for Linux dev/CI shells, and nix/msks-pkg.nix
+  # ships the binding in the msksd package. A macOS install carries
+  # the client, whose paths never import it; the daemon-side import
+  # stays guarded so an install without the library fails closed at
+  # attach with a named refusal, never silently.
+  "netfilterqueue>=0.9; sys_platform == 'linux'",
   "textual>=8.2.8",
   # The listings' and help's measured columns (#271): textual
   # already ships it, but the CLI imports it directly on every

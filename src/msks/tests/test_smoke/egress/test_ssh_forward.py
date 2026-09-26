@@ -17,7 +17,6 @@ from msks.settings import (
     NetSettings,
     ServerSettings,
     Settings,
-    VmmSettings,
 )
 
 from test_smoke import (
@@ -38,6 +37,7 @@ from test_smoke import (
     needs_local,
     needs_ssh_tools,
     run_in_console,
+    smoke_vmm_settings,
 )
 
 
@@ -64,7 +64,7 @@ async def test_local_sshd_and_rsync() -> None:
     token = f"smoke-token-{uuid.uuid4().hex}"
     api_port = free_port()
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),

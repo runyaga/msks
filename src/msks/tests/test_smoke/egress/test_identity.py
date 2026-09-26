@@ -18,7 +18,6 @@ from msks.settings import (
     NetSettings,
     ServerSettings,
     Settings,
-    VmmSettings,
 )
 
 from test_smoke import (
@@ -41,6 +40,7 @@ from test_smoke import (
     needs_local,
     needs_ssh_tools,
     run_in_console,
+    smoke_vmm_settings,
 )
 
 
@@ -65,7 +65,7 @@ async def test_local_minted_identity() -> None:
     token = f"smoke-token-{uuid.uuid4().hex}"
     api_port = free_port()
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),
@@ -607,7 +607,7 @@ async def test_local_client_minted_identity() -> None:
     token = f"smoke-token-{uuid.uuid4().hex}"
     api_port = free_port()
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),
@@ -869,7 +869,7 @@ async def test_local_operator_pubkey() -> None:
     token = f"smoke-token-{uuid.uuid4().hex}"
     api_port = free_port()
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),

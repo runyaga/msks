@@ -23,6 +23,10 @@
 { pkgs }:
 
 let
+  # The per-architecture pins (runyaga#1): herdr's release binary and
+  # Claude Code's native package come in one build per platform.
+  platform = pkgs.callPackage ./guest-platform.nix { };
+
   # The registry tarball behind the pi pin itself.
   piTarball = pkgs.fetchurl {
     url =
@@ -33,13 +37,13 @@ let
 
   # The herdr pin (#266): the terminal workspace manager for AI
   # coding agents (herdr.dev), as the pinned release's static
-  # x86-64 build — a digest-pinned upstream artifact, needing
-  # nothing from the image beyond the file itself.
+  # build for the guest's architecture — a digest-pinned upstream
+  # artifact, needing nothing from the image beyond the file itself.
   agentHerdrBinary = pkgs.fetchurl {
     url =
       "https://github.com/ogulcancelik/herdr/releases/download/"
-      + "v0.9.1/herdr-linux-x86_64";
-    hash = "sha256-KgL+0WvrZR7wBuHUPwSPZSyk3FitBTzS1ERQVj1cVLc=";
+      + platform.herdrBinary.name;
+    inherit (platform.herdrBinary) hash;
   };
 
   # herdr's license, pinned to the same tag the binary came from:
@@ -52,7 +56,7 @@ let
   };
 
   # The Claude Code pin (#266): the npm wrapper package plus the
-  # linux-x64 native-binary package, both digest-pinned. The
+  # platform's native-binary package, both digest-pinned. The
   # wrapper's own postinstall links the platform binary over its
   # bin stub; the staged package below does that wiring at build
   # time instead — a symlink standing in for the link — so the
@@ -65,9 +69,9 @@ let
   };
   agentClaudeBinary = pkgs.fetchurl {
     url =
-      "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/"
-      + "claude-code-linux-x64-2.1.281.tgz";
-    hash = "sha256-sNo8XYzhnBCEmFvKLkmqTG54rQYGwrSsfeYH2aMd10o=";
+      "https://registry.npmjs.org/@anthropic-ai/claude-code-${platform.claudePlatform}/-/"
+      + platform.claudeBinary.name;
+    inherit (platform.claudeBinary) hash;
   };
 
   # Claude Code in npm's global layout (#266): the wrapper at
@@ -84,15 +88,15 @@ let
         mods=$out/lib/node_modules/@anthropic-ai
         mkdir -p $mods/claude-code/bin
         mkdir -p \
-          $mods/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64
+          $mods/claude-code/node_modules/@anthropic-ai/claude-code-${platform.claudePlatform}
         tar -xzf ${agentClaudeWrapper} \
           -C $mods/claude-code --strip-components=1
         rm -f $mods/claude-code/bin/claude.exe
         tar -xzf ${agentClaudeBinary} \
-          -C $mods/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64 \
+          -C $mods/claude-code/node_modules/@anthropic-ai/claude-code-${platform.claudePlatform} \
           --strip-components=1
         ln -s \
-          ../node_modules/@anthropic-ai/claude-code-linux-x64/claude \
+          ../node_modules/@anthropic-ai/claude-code-${platform.claudePlatform}/claude \
           $mods/claude-code/bin/claude.exe
       '';
 
@@ -191,7 +195,9 @@ let
   # platform binary's ELF interpreter pointed at nixpkgs' glibc,
   # plus the bin link the profile needs (the pristine tree stays
   # bin-less for the Debian overlay to link itself). The binary as
-  # published wants /lib64/ld-linux-x86-64.so.2 — a stock NixOS
+  # published wants the FHS loader path (platform.loader:
+  # /lib64/ld-linux-x86-64.so.2 on x86_64,
+  # /lib/ld-linux-aarch64.so.1 on aarch64) — a stock NixOS
   # ships no such loader — and needs nothing else beyond glibc, so
   # once the loader resolves the binary runs.
   claudeLoaderPatched =
@@ -205,7 +211,7 @@ let
         cp -a ${claudePackage}/. $out/
         chmod -R u+w $out
         patchelf --set-interpreter "$loader" \
-          $out/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64/claude
+          $out/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-${platform.claudePlatform}/claude
         mkdir -p $out/bin
         ln -s \
           ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe \

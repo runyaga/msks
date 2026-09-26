@@ -1,0 +1,148 @@
+# A local msks stack on an Apple Silicon Mac (runyaga#2).
+#
+#   limactl start --name msks --timeout 90m contrib/lima/msks.yaml
+#
+# The first start builds the arm64 workspace image inside the VM,
+# which takes longer than limactl's default ten-minute wait — hence
+# the --timeout. Later starts reuse the built image.
+#
+# Lima boots an arm64 Debian 13 VM under Apple's Virtualization
+# framework with nested virtualization on, so /dev/kvm exists inside
+# it and cloud-hypervisor runs workspace microvms there. Provisioning
+# installs nix and devenv, clones msks into ~/msks, builds the arm64
+# workspace image, and starts the dev daemon with
+# `devenv processes up -d`. The daemon listens on a 127.0.0.1 port
+# inside the VM (8660 unless taken), and Lima's default port
+# forwarding publishes that port on the Mac's 127.0.0.1.
+#
+# Nested virtualization needs an M3 or later chip and macOS 15 or
+# later. The Mac-side client setup is in README.md ("A local stack
+# on an Apple Silicon Mac").
+#
+# Workspace memory comes from hugepages the VM reserves at boot
+# (MSKSD_HUGEPAGES): inside a nested VM, 4 KiB guest pages make an
+# 8 GiB workspace boot in minutes, hugepages in seconds. The
+# reservation leaves the rest of the VM's memory for nix builds and
+# the daemon; a Mac with less memory lowers both.
+#
+# Parameters (`--param name=value`):
+#   repo:      the git URL provisioning clones (default: upstream)
+#   branch:    the branch it checks out (default: main)
+#   hugepages: GiB of hugepages reserved for workspace memory
+#              (default: 16 — two workspaces at the 8 GiB default)
+minimumLimaVersion: 2.0.0
+
+vmType: vz
+nestedVirtualization: true
+arch: aarch64
+cpus: 8
+memory: 24GiB
+# The nix store holds the guest build's closure and the image
+# archive; workspaces add their overlays on top.
+disk: 80GiB
+
+images:
+  - location: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2"
+    arch: aarch64
+
+# The VM works on its own clone: the Mac checkout and the VM's
+# .devenv (a Linux venv, the daemon's state) stay apart.
+mounts: []
+
+param:
+  repo: "https://github.com/mcdonc/msks.git"
+  branch: "main"
+  hugepages: "16"
+
+provision:
+  # Root-side host setup: the pieces a NixOS deployment host gets
+  # from the msks module (nix/module.nix) and its security.wrappers
+  # entry.
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y -qq git curl ca-certificates libcap2-bin
+      # nix (multi-user, the Determinate installer). The download
+      # retries: a fresh VM's first TLS handshakes occasionally drop.
+      if [ ! -x /nix/var/nix/profiles/default/bin/nix ]; then
+        for _ in 1 2 3 4 5; do
+          curl -sSfL https://install.determinate.systems/nix -o /tmp/nix-install.sh && break
+          sleep 3
+        done
+        sh /tmp/nix-install.sh install --no-confirm
+      fi
+      # The workspace egress path forwards between the per-VM taps
+      # and the uplink.
+      # Hugepages back workspace memory (MSKSD_HUGEPAGES below): 512
+      # 2 MiB pages per GiB. sysctl.d reapplies the reservation at
+      # every boot, while memory is still unfragmented.
+      {
+        printf 'net.ipv4.ip_forward = 1\n'
+        printf 'vm.nr_hugepages = %d\n' $(( {{.Param.hugepages}} * 512 ))
+      } > /etc/sysctl.d/90-msks.conf
+      sysctl --system >/dev/null
+      # The capability wrapper the dev daemon execs through
+      # (scripts/dev-daemon.sh, DEV_CAPS): setpriv carrying exactly
+      # the two capabilities msksd raises ambient — net_admin for
+      # taps and nftables, net_bind_service for the egress stack's
+      # DHCP and DNS listeners. Members of the kvm group run it.
+      install -d -m 0755 /usr/local/lib/msks
+      install -m 0750 -g kvm /usr/bin/setpriv /usr/local/lib/msks/msks-caps
+      setcap cap_net_admin,cap_net_bind_service+ep /usr/local/lib/msks/msks-caps
+      usermod -aG kvm "{{.User}}"
+
+  # User-side: devenv, the clone, the image, the daemon.
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      export PATH=/nix/var/nix/profiles/default/bin:$HOME/.nix-profile/bin:$PATH
+      command -v devenv >/dev/null || nix profile add nixpkgs#devenv
+      if [ ! -d ~/msks ]; then
+        git clone -b "{{.Param.branch}}" "{{.Param.repo}}" ~/msks
+      fi
+      # Every login shell finds nix and devenv, and the daemon
+      # settings this VM needs: the capability wrapper above, the
+      # VM's uplink interface, and hugepage-backed workspace memory.
+      cat > ~/.msks-lima-env <<'EOF'
+      export PATH=/nix/var/nix/profiles/default/bin:$HOME/.nix-profile/bin:$PATH
+      export DEV_CAPS=/usr/local/lib/msks/msks-caps
+      export DEV_UPLINK=eth0
+      export MSKSD_HUGEPAGES=true
+      EOF
+      grep -q msks-lima-env ~/.bashrc || printf '. ~/.msks-lima-env\n' >> ~/.bashrc
+      . ~/.msks-lima-env
+      cd ~/msks
+      # The kvm group membership from the system step reaches this
+      # session through sg; the image build and the daemon both need
+      # /dev/kvm access.
+      sg kvm -c "devenv --quiet -O dotenv.enable:bool false shell -- msks-build-guest-archive"
+      sg kvm -c "devenv --quiet -O dotenv.enable:bool false processes up -d"
+
+probes:
+  - description: the msks dev daemon answers /health
+    script: |
+      #!/bin/bash
+      set -eu
+      port_file=~/msks/.devenv/state/msksd/port
+      if ! timeout 3600 bash -c "until [ -s $port_file ] && curl -sk https://127.0.0.1:\$(cat $port_file)/health >/dev/null; do sleep 5; done"; then
+        echo >&2 "msksd did not come up; see: limactl shell {{.Name}} -- bash -lc 'cd ~/msks && devenv processes logs msksd'"
+        exit 1
+      fi
+    hint: |
+      The first start builds the arm64 workspace image (tens of minutes).
+      Watch it with: limactl shell {{.Name}} -- bash -lc 'cd ~/msks && devenv processes logs msksd'
+
+message: |
+  msks is running in the {{.Name}} VM. Point the Mac-side client at it:
+
+    state=msks/.devenv/state/msksd   # below the VM user's home
+    export MSKSC_URL=https://127.0.0.1:$(limactl shell {{.Name}} -- bash -c "cat ~/$state/port")
+    export MSKSC_TOKEN=$(limactl shell {{.Name}} -- bash -c "cat ~/$state/bootstrap-token")
+    mkdir -p ~/.config/msks
+    limactl copy {{.Name}}:$state/msks-ca.pem ~/.config/msks/lima-ca.pem
+    export MSKSC_CAFILE=~/.config/msks/lima-ca.pem
+    msks ls

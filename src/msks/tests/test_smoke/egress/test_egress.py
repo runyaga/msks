@@ -21,7 +21,6 @@ from msks.settings import (
     NetSettings,
     ServerSettings,
     Settings,
-    VmmSettings,
 )
 
 from test_smoke import (
@@ -48,6 +47,7 @@ from test_smoke import (
     needs_local,
     needs_ssh_tools,
     run_in_console,
+    smoke_vmm_settings,
     uplink_address,
 )
 
@@ -72,7 +72,7 @@ async def test_local_egress_boot() -> None:
     ip_tool = os.environ.get("TEST_IP") or shutil.which("ip") or "ip"
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),
@@ -232,7 +232,7 @@ async def test_local_egress_git_out() -> None:
     token = f"smoke-token-{uuid.uuid4().hex}"
     api_port = free_port()
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=uplink_iface,
@@ -997,7 +997,7 @@ async def test_local_egress_consent_interactive() -> None:
     ip_tool = os.environ.get("TEST_IP") or shutil.which("ip") or "ip"
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),
@@ -1116,7 +1116,7 @@ async def test_local_egress_consent_static() -> None:
     ip_tool = os.environ.get("TEST_IP") or shutil.which("ip") or "ip"
     state_dir = Path(f"/tmp/msks-smoke-{uuid.uuid4().hex[:8]}")
     settings = Settings(
-        vmm=VmmSettings(state_dir=state_dir),
+        vmm=smoke_vmm_settings(state_dir),
         net=NetSettings(
             enabled=True,
             uplink=default_route_iface(),

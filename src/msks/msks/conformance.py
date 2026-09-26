@@ -47,6 +47,7 @@ from .settings import (
     ServerSettings,
     Settings,
     VmmSettings,
+    flag_env,
 )
 
 #: The contract points, in report order. Each names one row.
@@ -707,7 +708,9 @@ def settings_for(
 ) -> Settings:
     """The settings the throwaway app runs under. The uplink probe
     runs only for the egress pass — a core-only check must run on
-    hosts with no route (and no iproute2) at all."""
+    hosts with no route (and no iproute2) at all. MSKSD_HUGEPAGES
+    carries over from the environment: the check boots the image the
+    way this host's daemon would (runyaga#1)."""
     net = (
         NetSettings(enabled=True, uplink=uplink or default_uplink())
         if egress
@@ -717,6 +720,7 @@ def settings_for(
         vmm=VmmSettings(
             state_dir=state_dir,
             vsock_shell_port=record.vsock_shell_port,
+            hugepages=flag_env(os.environ, "MSKSD_HUGEPAGES", False),
         ),
         server=ServerSettings(db_path=state_dir / "conf.db"),
         net=net,

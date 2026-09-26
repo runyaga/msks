@@ -991,3 +991,28 @@ def test_default_uplink_names_a_missing_ip_tool(
     monkeypatch.setattr(subprocess, "run", gone)
     with pytest.raises(RuntimeError, match="--uplink"):
         default_uplink()
+
+
+def test_the_check_carries_the_hosts_hugepages_setting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """MSKSD_HUGEPAGES reaches the throwaway app (runyaga#1): the
+    check boots the image the way this host's daemon would."""
+    record = conformance.ImageRecord(
+        hash="h",
+        name="debian",
+        version="13.6",
+        cmdline="console=ttyS0",
+        vsock_shell_port=1023,
+        kernel_version="k",
+        kernel_format="bzImage",
+        kernel=tmp_path / "k",
+        initrd=tmp_path / "i",
+        rootfs=tmp_path / "r",
+    )
+    monkeypatch.delenv("MSKSD_HUGEPAGES", raising=False)
+    off = conformance.settings_for(tmp_path, record, False, None)
+    assert off.vmm.hugepages is False
+    monkeypatch.setenv("MSKSD_HUGEPAGES", "true")
+    on = conformance.settings_for(tmp_path, record, False, None)
+    assert on.vmm.hugepages is True
