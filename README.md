@@ -188,6 +188,50 @@ misdetection guard), which breaks any guest writing an ext4
 superblock — every disk the daemon creates declares
 `image_type: Raw`.
 
+### A local stack on an Apple Silicon Mac
+
+The daemon runs on Linux with KVM; on an Apple Silicon Mac it runs
+inside an arm64 Linux VM that has nested virtualization, and the
+client runs on the Mac itself. `contrib/lima/msks.yaml` sets the VM
+up with [Lima](https://lima-vm.io): Debian 13 arm64, nix and devenv,
+a clone of this repository, the arm64 workspace image, and the dev
+daemon started with `devenv processes up -d`. Nested virtualization
+needs an M3 or later chip and macOS 15 or later.
+
+```bash
+brew install lima
+limactl start --name msks --timeout 90m contrib/lima/msks.yaml
+```
+
+The first start builds the workspace image inside the VM, which is
+what the long timeout covers. `--param repo=<url> --param
+branch=<name>` clones a fork or branch instead of upstream `main`.
+The VM takes 24 GiB of the Mac's memory and reserves 16 GiB of it as
+hugepages for workspace memory (`MSKSD_HUGEPAGES`): inside a nested
+VM, 4 KiB guest pages stretch an 8 GiB workspace's boot to minutes,
+and hugepages keep it to seconds. `--param hugepages=<GiB>` together
+with `--memory` sizes both for a smaller Mac.
+The daemon listens on a `127.0.0.1` port inside the VM, and Lima
+publishes that port on the Mac's `127.0.0.1`. The Mac-side client
+reads the port, the bootstrap token, and the daemon's CA from the
+VM's state directory (`limactl start` prints the same lines when it
+finishes):
+
+```bash
+state=/home/$USER.guest/msks/.devenv/state/msksd
+export MSKSC_URL=https://127.0.0.1:$(limactl shell msks -- cat $state/port)
+export MSKSC_TOKEN=$(limactl shell msks -- cat $state/bootstrap-token)
+mkdir -p ~/.config/msks
+limactl copy msks:$state/msks-ca.pem ~/.config/msks/lima-ca.pem
+export MSKSC_CAFILE=~/.config/msks/lima-ca.pem
+msks ls
+```
+
+On macOS, `devenv shell` in the Mac checkout provides the client,
+the linters, and the unit suite; the daemon-side tests that need
+Linux (the VMM driver, the egress stack, the secret store) run in
+the VM or on CI.
+
 ### The image catalog (#40)
 
 Images are plural: msksd holds a catalog under
