@@ -78,20 +78,36 @@ let
   secretspec = pkgs.stdenv.mkDerivation {
     pname = "secretspec";
     version = "0.20.0";
-    src = pkgs.fetchurl {
-      url =
-        if pkgs.stdenv.isx86_64 then
-          "https://github.com/cachix/secretspec/releases/download/v0.20.0/secretspec-x86_64-unknown-linux-gnu.tar.xz"
-        else if pkgs.stdenv.isAarch64 then
-          "https://github.com/cachix/secretspec/releases/download/v0.20.0/secretspec-aarch64-unknown-linux-gnu.tar.xz"
-        else
-          throw "secretspec: no prebuilt binary for ${pkgs.stdenv.hostPlatform.system}";
-      hash =
-        if pkgs.stdenv.isx86_64 then
-          "sha256-NNNMFIxGXICd9UdSYWmClb2RF+UnfWeT7HlwJtQmIRQ="
-        else
-          "sha256-Jbg9vHuFG7NA84QaGdBGoWOQKfGRhY4LPxHi67YjNvI=";
-    };
+    src =
+      let
+        # Release tarballs keyed by nix system (the triple in each
+        # asset name); any other platform fails at eval time.
+        assets = {
+          x86_64-linux = {
+            triple = "x86_64-unknown-linux-gnu";
+            hash = "sha256-NNNMFIxGXICd9UdSYWmClb2RF+UnfWeT7HlwJtQmIRQ=";
+          };
+          aarch64-linux = {
+            triple = "aarch64-unknown-linux-gnu";
+            hash = "sha256-Jbg9vHuFG7NA84QaGdBGoWOQKfGRhY4LPxHi67YjNvI=";
+          };
+          aarch64-darwin = {
+            triple = "aarch64-apple-darwin";
+            hash = "sha256-wX+kl4JaOnI3V0z+p6VGADd7NOqnliUYu6PRx+1ZSow=";
+          };
+          x86_64-darwin = {
+            triple = "x86_64-apple-darwin";
+            hash = "sha256-/+BcDgw8v503E9vGOhAIjcMM0IRy9nPE78zEz59MbcI=";
+          };
+        };
+        system = pkgs.stdenv.hostPlatform.system;
+        asset =
+          assets.${system} or (throw "secretspec: no prebuilt binary for ${system}");
+      in
+      pkgs.fetchurl {
+        url = "https://github.com/cachix/secretspec/releases/download/v0.20.0/secretspec-${asset.triple}.tar.xz";
+        inherit (asset) hash;
+      };
     sourceRoot = ".";
     dontConfigure = true;
     dontBuild = true;
@@ -114,7 +130,7 @@ in
   # the rust-overlay input in devenv.lock. The LLVM 23 tools pair
   # with the pinned rustc's LLVM for the coverage gate's
   # llvm-profdata/llvm-cov.
-  env.RUST_LLVM_TOOLS = "${rustLlvmTools}/lib/rustlib/x86_64-unknown-linux-gnu/bin";
+  env.RUST_LLVM_TOOLS = "${rustLlvmTools}/lib/rustlib/${pkgs.stdenv.hostPlatform.rust.rustcTarget}/bin";
 
   languages.rust = {
     enable = true;
@@ -145,56 +161,66 @@ in
     directory = ".";
   };
 
-  packages = with pkgs; [
-    bash # explicit bash for shell scripts (CI /bin/sh may be dash)
-    # Cargo plugin kept for ad-hoc local coverage reports
-    # (`cargo llvm-cov --branch`); the gate itself drives the LLVM
-    # tools directly (scripts/rust-coverage.sh) because nightly
-    # cargo's build layout breaks this tool's object discovery.
-    cargo-llvm-cov
-    cloud-hypervisor # VMM driven by the local backend (#1); ships ch-remote
-    curl # unix-socket REST poking during CH debugging
-    e2fsprogs # resize2fs/e2fsck: grow and check workspace volumes
-    cdrtools # genisoimage: the #41 cidata seed disks (iso9660)
-    iproute2 # taps and addresses for the dev daemon's workspaces
-    iptables # diagnose foreign FORWARD drops (docker's policy on CI runners)
-    # that block the egress forward path the nft rules accept (#75/#52)
-    jscpd # token-clone scanner (#71), pinned rust binary (see above)
-    nftables # egress chains/NAT for the #52 smoke path
-    conntrack-tools # the consent-revocation tool the daemon execs (net/conntrack.py, #52)
-    openssh # host-side ssh client: the forward-path smoke (#110) and
-    # the documented ssh workflow (#112) run over `msks forward`
-    qemu # qemu-img for rootfs conversion during guest-image experiments
-    rsync # host-side rsync over the forward (#110's sync path)
-    secretspec # the #198 secret store's CLI (pinned release binary)
-    ruff
-    socat # AF_UNIX <-> pty/stdio plumbing for CH socket debugging
-    tcpdump # packet-level debugging of the egress path (tap vs uplink)
-    # cyclomatic-complexity gate tool: built against python3.14 because
-    # nixpkgs' top-level xenon runs on an older python whose parser can
-    # reject syntax ruff format writes for a 3.14 codebase, silently
-    # skipping files (klangk #3411/#3415 precedent). scripts/xenon-gate.sh
-    # turns any such skip into a hard failure.
-    (pkgs.callPackage (pkgs.path + "/pkgs/by-name/xe/xenon/package.nix") {
-      python3 = pkgs.python314;
-    })
-    (python314Packages.radon) # complexity introspection (radon cc)
-    # egress consent's NFQUEUE binding (#69): the C libraries the
-    # netfilterqueue wheel links (the queue library and its
-    # nfnetlink substrate), present so `uv sync` builds it in every
-    # dev/CI shell — the binding is a base dependency and the flags
-    # below point its build and import at these store paths.
-    libnetfilter_queue
-    libnfnetlink
-  ];
+  # The host-side daemon toolchain — the VMM, the egress network
+  # stack, and the NFQUEUE libraries — is Linux-only; a macOS shell
+  # carries the client, the lint and test tooling, and the guest
+  # build's nix entry points (#3 on the runyaga fork).
+  packages =
+    with pkgs;
+    [
+      bash # explicit bash for shell scripts (CI /bin/sh may be dash)
+      # Cargo plugin kept for ad-hoc local coverage reports
+      # (`cargo llvm-cov --branch`); the gate itself drives the LLVM
+      # tools directly (scripts/rust-coverage.sh) because nightly
+      # cargo's build layout breaks this tool's object discovery.
+      cargo-llvm-cov
+      curl # unix-socket REST poking during CH debugging
+      e2fsprogs # resize2fs/e2fsck: grow and check workspace volumes
+      cdrtools # genisoimage: the #41 cidata seed disks (iso9660)
+      jscpd # token-clone scanner (#71), pinned rust binary (see above)
+      openssh # host-side ssh client: the forward-path smoke (#110) and
+      # the documented ssh workflow (#112) run over `msks forward`
+      qemu # qemu-img for rootfs conversion during guest-image experiments
+      rsync # host-side rsync over the forward (#110's sync path)
+      secretspec # the #198 secret store's CLI (pinned release binary)
+      ruff
+      socat # AF_UNIX <-> pty/stdio plumbing for CH socket debugging
+      tcpdump # packet-level debugging of the egress path (tap vs uplink)
+      # cyclomatic-complexity gate tool: built against python3.14 because
+      # nixpkgs' top-level xenon runs on an older python whose parser can
+      # reject syntax ruff format writes for a 3.14 codebase, silently
+      # skipping files (klangk #3411/#3415 precedent). scripts/xenon-gate.sh
+      # turns any such skip into a hard failure.
+      (pkgs.callPackage (pkgs.path + "/pkgs/by-name/xe/xenon/package.nix") {
+        python3 = pkgs.python314;
+      })
+      (python314Packages.radon) # complexity introspection (radon cc)
+    ]
+    ++ lib.optionals stdenv.isLinux [
+      cloud-hypervisor # VMM driven by the local backend (#1); ships ch-remote
+      iproute2 # taps and addresses for the dev daemon's workspaces
+      iptables # diagnose foreign FORWARD drops (docker's policy on CI runners)
+      # that block the egress forward path the nft rules accept (#75/#52)
+      nftables # egress chains/NAT for the #52 smoke path
+      conntrack-tools # the consent-revocation tool the daemon execs (net/conntrack.py, #52)
+      # egress consent's NFQUEUE binding (#69): the C libraries the
+      # netfilterqueue wheel links (the queue library and its
+      # nfnetlink substrate), present so `uv sync` builds it in every
+      # Linux dev/CI shell — the binding is a base dependency on
+      # Linux and the flags below point its build and import at these
+      # store paths.
+      libnetfilter_queue
+      libnfnetlink
+    ];
 
   env.UV_PYTHON = config.languages.python.package;
   # The wheel build (CFLAGS/LDFLAGS) and the runtime import
   # (LD_LIBRARY_PATH) both resolve against the nix store — each
-  # library carries its .so and headers in one output.
-  env.CFLAGS = "-I${pkgs.libnetfilter_queue}/include -I${pkgs.libnfnetlink}/include";
-  env.LDFLAGS = "-L${pkgs.libnetfilter_queue}/lib -L${pkgs.libnfnetlink}/lib";
-  env.LD_LIBRARY_PATH = "${pkgs.libnetfilter_queue}/lib:${pkgs.libnfnetlink}/lib";
+  # library carries its .so and headers in one output. Linux-only,
+  # with the libraries themselves.
+  env.CFLAGS = lib.optionalString pkgs.stdenv.isLinux "-I${pkgs.libnetfilter_queue}/include -I${pkgs.libnfnetlink}/include";
+  env.LDFLAGS = lib.optionalString pkgs.stdenv.isLinux "-L${pkgs.libnetfilter_queue}/lib -L${pkgs.libnfnetlink}/lib";
+  env.LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux "${pkgs.libnetfilter_queue}/lib:${pkgs.libnfnetlink}/lib";
 
   # The nixpkgs source the devenv lock pins — the revision every
   # guest build compiles against. Exported to every devenv context
