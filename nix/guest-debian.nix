@@ -651,7 +651,7 @@ let
     table = json.load(sys.stdin)["partitiontable"]
     root = None
     for part in table["partitions"]:
-        if part["type"] == "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709":
+        if part["type"] == "${platform.rootPartitionType}":
             root = part
             break
     assert root is not None, "no Linux root partition found"
@@ -1039,7 +1039,7 @@ let
         # ACPI power-button pair (button + evdev: logind answers the
         # host-side graceful shutdown with a clean poweroff, #25),
         # isofs (the #41 NoCloud seed disk is iso9660),
-        # the platform's CPU modules (nix/guest-platform.nix; on
+        # the platform's modules (nix/guest-platform.nix; on
         # x86_64: crc32c-intel, the hardware crc32c ext4's metadata_csum
         # asks the crypto API for; udev autoloads it via its
         # x86cpu modalias), and the L3 recursion set (#82): the
@@ -1073,7 +1073,7 @@ let
           button
           evdev
           isofs
-          ${lib.concatStringsSep "\n  " platform.cpuModules}
+          ${lib.concatStringsSep "\n  " platform.platformModules}
           tun
           nf_tables
           nft_chain_nat

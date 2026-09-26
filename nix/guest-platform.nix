@@ -26,10 +26,16 @@ let
       # bzImage with the PVH entry point (CONFIG_PVH=y) — what
       # cloud-hypervisor's x86 direct boot takes.
       kernelFormat = "bzImage";
-      # The x86cpu modules the runtime closure carries: the hardware
-      # crc32c ext4's metadata_csum asks the crypto API for, and the
-      # nested-KVM pair (kvm and its deps ride in through modprobe).
-      cpuModules = [
+      # The cloud image's root partition type GUID (the
+      # Discoverable Partitions Specification's per-architecture
+      # "Linux root" type).
+      rootPartitionType = "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709";
+      # The platform-specific modules the runtime closure carries:
+      # the x86cpu hardware crc32c ext4's metadata_csum asks the
+      # crypto API for, and the nested-KVM pair (kvm and its deps
+      # ride in through modprobe). The ACPI power button's `button`
+      # module is in the shared list.
+      platformModules = [
         "crc32c-intel"
         "kvm-intel"
         "kvm-amd"
@@ -80,10 +86,15 @@ let
       # The arm64 boot Image (Debian ships it uncompressed as
       # vmlinuz) — what cloud-hypervisor's aarch64 direct boot takes.
       kernelFormat = "Image";
+      rootPartitionType = "B921B045-1DF0-41C3-AF44-4C6F280D3FAE";
       # KVM is built into the arm64 kernel (CONFIG_KVM=y) and the
-      # crc32c instructions serve the crypto API without a module,
-      # so the closure needs no CPU-specific entries.
-      cpuModules = [ ];
+      # crc32c instructions serve the crypto API without a module.
+      # The power button differs: cloud-hypervisor's aarch64 guest
+      # gets it as a GPIO key on the PL061 (a device-tree
+      # gpio-keys node), not an ACPI button, and gpio_keys is a
+      # module in Debian's arm64 kernel — without it the host's
+      # graceful-shutdown press never reaches logind (#25).
+      platformModules = [ "gpio_keys" ];
       kvmModprobe = "true";
       debianImage = {
         name = "debian-13-genericcloud-arm64-20260831-2587.qcow2";
