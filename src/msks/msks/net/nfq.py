@@ -32,13 +32,15 @@ skips it), and a deny on such a destination refuses only its own
 connection — the RST element is keyed by the connection's source
 port, so the co-resident's connections never see it.
 
-``netfilterqueue`` ships with every install (consent is the normal
-posture for workspaces): the devenv shells build it against
-nixpkgs' libnetfilter_queue/libnfnetlink, and the package closure
-builds it via ``nix/netfilterqueue-pkg.nix``. The import stays
-guarded — an exotic install without the library fails closed at
-bind time as a named refusal (the workspace boot refuses rather
-than running an unanswered queue), never silently.
+``netfilterqueue`` ships with every Linux install (consent is the
+normal posture for workspaces): the Linux devenv shells build it
+against nixpkgs' libnetfilter_queue/libnfnetlink, and the package
+closure builds it via ``nix/netfilterqueue-pkg.nix``. A macOS
+install carries the client and leaves the binding out, since the
+library is Linux-only. The import stays guarded — an install
+without the library fails closed at bind time as a named refusal
+(the workspace boot refuses rather than running an unanswered
+queue), never silently.
 """
 
 import asyncio
